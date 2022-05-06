@@ -302,6 +302,28 @@ impl<'a> SmbClient<'a> {
         Ok(())
     }
 
+    pub fn open_dir<'b, P: AsRef<str>>(
+        &'b self,
+        path: P,
+    ) -> Result<SmbDir<'a, 'b>> {
+        trace!(target: "smbc", "open_dir");
+
+        let open_fn = self.get_fn(smbc_getFunctionOpendir)?;
+
+        let path = cstring(path)?;
+        trace!(target: "smbc", "opening {:?}", path);
+
+        let fd = result_from_ptr_mut(open_fn(
+            self.ctx,
+            path.as_ptr()
+        ))?;
+
+        if (fd as i64) < 0 {
+            trace!(target: "smbc", "neg fd");
+        }
+        Ok(SmbDir { smbc: &self, fd })
+    }
+
     //    pub fn create_dir_all<P: AsRef<str>>(&self, path: P) -> Result<()> {
     //        unimplemented!();
     //    }
@@ -434,6 +456,35 @@ impl Default for OpenOptions {
             read: true,
             write: false,
             mode: 0o644,
+        }
+    }
+}
+
+pub struct SmbDir<'a: 'b, 'b> {
+    smbc: &'b SmbClient<'a>,
+    fd: *mut SMBCFILE,
+}
+
+
+impl<'a, 'b> SmbDir<'a, 'b> {
+    pub fn read(&mut self) -> Result<&smbc_dirent> {
+        let read_fn = self.smbc.get_fn(smbc_getFunctionReaddir)?;
+        let smbc_dirent = result_from_ptr_mut(read_fn(
+            self.smbc.ctx,
+            self.fd
+        ))?;
+        unsafe {
+            Ok(smbc_dirent.as_ref().unwrap())
+        }
+    }
+}
+
+
+impl<'a, 'b> Drop for SmbDir<'a, 'b> {
+    fn drop(&mut self) {
+        trace!(target: "smbc", "closing file");
+        if let Ok(close_fn) = self.smbc.get_fn(smbc_getFunctionClosedir) {
+            close_fn(self.smbc.ctx, self.fd);
         }
     }
 }
