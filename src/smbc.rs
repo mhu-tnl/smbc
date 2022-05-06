@@ -28,6 +28,8 @@ use std::ptr;
 use std::borrow::Cow;
 use std::io::{Read, Seek, SeekFrom, Write};
 
+use libc::stat;
+use libc::types::os::common::posix01;
 use libc::{self, c_char, c_int, c_void, mode_t, off_t};
 
 use result::Result;
@@ -159,10 +161,10 @@ impl<'a> SmbClient<'a> {
             smbc_setOptionUserData(ctx, auth_fn as *const _ as *mut c_void);
             smbc_setFunctionAuthDataWithContext(ctx, Some(Self::auth_wrapper::<F>));
 
-            smbc_setOptionOneSharePerServer(ctx, SMBC_TRUE);
+            //smbc_setOptionOneSharePerServer(ctx, SMBC_TRUE);
 
             smbc_setOptionDebugToStderr(ctx, SMBC_TRUE);
-            //smbc_setDebug(ctx, 10);
+            smbc_setDebug(ctx, 10);
 
             smbc.ctx = result_from_ptr_mut(smbc_init_context(ctx))?;
         }
@@ -286,12 +288,18 @@ impl<'a> SmbClient<'a> {
         )
     }
 
-    #[doc(hidden)]
     /// Get metadata for file at `path`
-    pub fn metadata<P: AsRef<str>>(&self, path: P) -> Result<()> {
-        let _stat_fn = self.get_fn(smbc_getFunctionStat)?;
-        let _path = cstring(path)?;
-        unimplemented!();
+    pub fn metadata<P: AsRef<str>>(&self, path: P) -> Result<stat> {
+        unsafe {
+            let stat_fn = self.get_fn(smbc_getFunctionStat)?;
+            let path = cstring(path)?;
+
+            let mut stat: stat = std::mem::zeroed();
+            let stat_pointer_mut = &mut stat as *mut stat;
+
+            let res = to_result_with_le(stat_fn(self.ctx, path.as_ptr(), stat_pointer_mut))?;
+            Ok(stat)
+        }
     }
 
     /// Create new directory at SMB `path`
