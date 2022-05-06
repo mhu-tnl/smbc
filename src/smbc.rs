@@ -302,10 +302,7 @@ impl<'a> SmbClient<'a> {
         Ok(())
     }
 
-    pub fn open_dir<'b, P: AsRef<str>>(
-        &'b self,
-        path: P,
-    ) -> Result<SmbDir<'a, 'b>> {
+    pub fn open_dir<'b, P: AsRef<str>>(&'b self, path: P) -> Result<SmbDir<'a, 'b>> {
         trace!(target: "smbc", "open_dir");
 
         let open_fn = self.get_fn(smbc_getFunctionOpendir)?;
@@ -313,10 +310,7 @@ impl<'a> SmbClient<'a> {
         let path = cstring(path)?;
         trace!(target: "smbc", "opening {:?}", path);
 
-        let fd = result_from_ptr_mut(open_fn(
-            self.ctx,
-            path.as_ptr()
-        ))?;
+        let fd = result_from_ptr_mut(open_fn(self.ctx, path.as_ptr()))?;
 
         if (fd as i64) < 0 {
             trace!(target: "smbc", "neg fd");
@@ -465,20 +459,56 @@ pub struct SmbDir<'a: 'b, 'b> {
     fd: *mut SMBCFILE,
 }
 
+pub enum SmbDirEntryType {
+    SmbcWorkgroup = 1,
+    SmbcServer = 2,
+    SmbcFileShare = 3,
+    SmbcPrinterShare = 4,
+    SmbcCommsShare = 5,
+    SmbcIpcShare = 6,
+    SmbcDir = 7,
+    SmbcFile = 8,
+    SmbcLink = 9,
+    Unknown,
+}
 
-impl<'a, 'b> SmbDir<'a, 'b> {
-    pub fn read(&mut self) -> Result<&smbc_dirent> {
-        let read_fn = self.smbc.get_fn(smbc_getFunctionReaddir)?;
-        let smbc_dirent = result_from_ptr_mut(read_fn(
-            self.smbc.ctx,
-            self.fd
-        ))?;
-        unsafe {
-            Ok(smbc_dirent.as_ref().unwrap())
+impl From<u32> for SmbDirEntryType {
+    fn from(i: u32) -> SmbDirEntryType {
+        match i {
+            1 => SmbDirEntryType::SmbcWorkgroup,
+            2 => SmbDirEntryType::SmbcServer,
+            3 => SmbDirEntryType::SmbcFileShare,
+            4 => SmbDirEntryType::SmbcPrinterShare,
+            5 => SmbDirEntryType::SmbcCommsShare,
+            6 => SmbDirEntryType::SmbcIpcShare,
+            7 => SmbDirEntryType::SmbcDir,
+            8 => SmbDirEntryType::SmbcFile,
+            9 => SmbDirEntryType::SmbcLink,
+            _ => SmbDirEntryType::Unknown,
         }
     }
 }
 
+pub struct SmbDirEntry {
+    pub smbc_type: SmbDirEntryType,
+    pub comment: String,
+    pub name: String,
+}
+
+impl<'a, 'b> SmbDir<'a, 'b> {
+    pub fn read(&mut self) -> Result<SmbDirEntry> {
+        let read_fn = self.smbc.get_fn(smbc_getFunctionReaddir)?;
+        let smbc_dirent = result_from_ptr_mut(read_fn(self.smbc.ctx, self.fd))?;
+        unsafe {
+            let smbc_dirent = smbc_dirent.as_ref().unwrap();
+            Ok(SmbDirEntry {
+                smbc_type: SmbDirEntryType::from(smbc_dirent.smbc_type),
+                comment: cstr(smbc_dirent.comment).to_string(),
+                name: cstr(smbc_dirent.name.as_ptr()).to_string(),
+            })
+        }
+    }
+}
 
 impl<'a, 'b> Drop for SmbDir<'a, 'b> {
     fn drop(&mut self) {
